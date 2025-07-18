@@ -10,7 +10,7 @@ import (
 
 type Storage interface {
 	CreateAccount(*Account) error
-	DeleteAccount(int) error
+	DeleteAccount(string) error
 	UpdateAccount(*Account) error
 	GetAccounts() ([]*Account, error)
 	GetAccountById(string) (*Account, error)
@@ -94,13 +94,7 @@ func (s *PostgresStorage) GetAccounts() ([]*Account, error) {
 	results := []*Account{}
 
 	for accounts.Next() {
-		account := new(Account)
-		err := accounts.Scan(&account.Id,
-			&account.FirstName,
-			&account.LastName,
-			&account.Number,
-			&account.Balance,
-			&account.CreateAt)
+		account, err := s.scanIntoAccount(accounts)
 
 		if err != nil {
 			return nil, err
@@ -112,8 +106,16 @@ func (s *PostgresStorage) GetAccounts() ([]*Account, error) {
 	return results, nil
 }
 
-func (s *PostgresStorage) DeleteAccount(id int) error {
-	return nil
+func (s *PostgresStorage) DeleteAccount(id string) error {
+	sql := "DELETE FROM account WHERE id = $1"
+
+	_, err := s.db.Exec(sql, id)
+
+	if err != nil {
+		return fmt.Errorf("Error occurred while deleting account with id %s: %v", id, err)
+	}
+
+	return err
 }
 
 func (s *PostgresStorage) UpdateAccount(account *Account) error {
@@ -139,4 +141,21 @@ func (s *PostgresStorage) GetAccountById(id string) (*Account, error) {
 	fmt.Printf("%+v\n", result)
 
 	return result, nil
+}
+
+func (s *PostgresStorage) scanIntoAccount(rows *sql.Rows) (*Account, error) {
+	account := &Account{}
+	err := rows.Scan(
+		&account.Id,
+		&account.FirstName,
+		&account.LastName,
+		&account.Number,
+		&account.Balance,
+		&account.CreateAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return account, nil
 }
