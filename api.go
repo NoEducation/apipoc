@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/pbkdf2"
+	"crypto/sha1"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -40,6 +43,7 @@ func NewApiServer(listenAddress string, store Storage) *ApiServer {
 func (s *ApiServer) Run() {
 	router := mux.NewRouter()
 
+	router.HandleFunc("/login", makeHttpHandleFunc(s.handleLogin)).Methods(http.MethodPost)
 	router.HandleFunc("/account", makeHttpHandleFunc(s.handleAccount))
 	router.HandleFunc("/account/{id}", withJwtAuth(makeHttpHandleFunc(s.handleAccountById), s.store))
 	router.HandleFunc("/account/transfer", makeHttpHandleFunc(s.handleTransferAccount))
@@ -105,6 +109,56 @@ func makeHttpHandleFunc(f apiFunc) http.HandlerFunc {
 	}
 }
 
+func (s *ApiServer) handleLogin(w http.ResponseWriter, r *http.Request) error {
+	var req LoginRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		return err
+	}
+	defer r.Body.Close()
+
+	account, err := s.store.GetAccountByEmail(req.Email)
+
+	if err != nil {
+		return err
+	}
+
+	passwordString, err := s.getPasswordHash(req.Password)
+
+	if err != nil || account.Password != passwordString {
+		return WriteJson(w, http.StatusUnauthorized, ApiErrorResponse{Error: "Unauthorized"})
+	}
+
+	token, err := s.createJwtToken(account)
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("JWT Token %s", token)
+	w.Header().Set("x-jwt-token", token)
+
+	return WriteJson(w, http.StatusOK, ApiSuccessResponse{
+		Response: map[string]any{
+			"message": "Login successful",
+			"token":   token,
+		},
+	})
+}
+
+func (s *ApiServer) getPasswordHash(password string) (string, error) {
+	salt := os.Getenv("API_SALT")
+	passwordHash, err := pbkdf2.Key(sha1.New, password, []byte(salt), 4096, 32)
+
+	if err != nil {
+		return "", err
+	}
+
+	passwordString := base64.StdEncoding.EncodeToString(passwordHash)
+
+	return passwordString, nil
+}
+
 func (s *ApiServer) handleAccount(w http.ResponseWriter, r *http.Request) error {
 	switch r.Method {
 	case http.MethodGet:
@@ -162,27 +216,27 @@ func (s *ApiServer) handleCreateAccount(w http.ResponseWriter, r *http.Request) 
 	}
 	defer r.Body.Close()
 
-	account := NewAccount(createAccountRequest.FirstName, createAccountRequest.LastName)
+	salt := os.Getenv("API_SALT")
+	passwordHash, err := pbkdf2.Key(sha1.New, createAccountRequest.Password, []byte(salt), 4096, 32)
+
+	if err != nil {
+		fmt.Println("Error generating password hash:", err)
+		return err
+	}
+
+	account := NewAccount(createAccountRequest.FirstName,
+		createAccountRequest.LastName,
+		base64.StdEncoding.EncodeToString(passwordHash),
+		createAccountRequest.Email)
 
 	if err := s.store.CreateAccount(account); err != nil {
 		return err
 	}
 
-	token, err := s.createJwtToken(account)
-
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("JWT Token %s", token)
-
-	w.Header().Set("x-jwt-token", token)
-
 	message := ApiSuccessResponse{
 		Response: map[string]any{
 			"message": "Account created successfully",
 			"account": account,
-			"token":   token,
 		},
 	}
 

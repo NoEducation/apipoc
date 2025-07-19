@@ -14,6 +14,7 @@ type Storage interface {
 	UpdateAccount(*Account) error
 	GetAccounts() ([]*Account, error)
 	GetAccountById(string) (*Account, error)
+	GetAccountByEmail(string) (*Account, error)
 }
 
 type PostgresStorage struct {
@@ -45,9 +46,13 @@ func (s *PostgresStorage) createAccountTable() error {
 		id VARCHAR(64) PRIMARY KEY,
 		firstName VARCHAR(128) NOT NULL,
 		lastName VARCHAR(128) NOT NULL,
+		email VARCHAR(256) NOT NULL,
+		password VARCHAR(256) NOT NULL,
 		number BIGINT NOT NULL,
 		balance NUMERIC NOT NULL,
-		createdAt TIMESTAMP
+		createdAt TIMESTAMP,
+
+		CONSTRAINT ux_email_unique UNIQUE (email)
 	);`
 
 	_, err := s.db.Exec(command)
@@ -61,13 +66,15 @@ func (s *PostgresStorage) createAccountTable() error {
 
 func (s *PostgresStorage) CreateAccount(account *Account) error {
 	sql := `
-		INSERT INTO account(id, firstName, lastName, number, balance, createdAt)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO account(id, firstName, lastName, email, password, number, balance, createdAt)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
 
 	_, err := s.db.Exec(sql, account.Id,
 		account.FirstName,
 		account.LastName,
+		account.Email,
+		account.Password,
 		account.Number,
 		account.Balance,
 		account.CreateAt)
@@ -82,7 +89,7 @@ func (s *PostgresStorage) CreateAccount(account *Account) error {
 }
 
 func (s *PostgresStorage) GetAccounts() ([]*Account, error) {
-	sql := `SELECT id, firstName, lastName, number, balance, createdAt FROM account`
+	sql := `SELECT id, firstName, lastName, email, number, balance, createdAt FROM account`
 	accounts, err := s.db.Query(sql)
 
 	if err != nil {
@@ -123,13 +130,38 @@ func (s *PostgresStorage) UpdateAccount(account *Account) error {
 }
 
 func (s *PostgresStorage) GetAccountById(id string) (*Account, error) {
-	sql := `SELECT id, firstName, lastName, number, balance, createdAt FROM account WHERE id = $1`
+	sql := `SELECT id, firstName, lastName, email, password, number, balance, createdAt FROM account WHERE id = $1`
 	account := s.db.QueryRow(sql, id)
 
 	result := new(Account)
 	err := account.Scan(&result.Id,
 		&result.FirstName,
 		&result.LastName,
+		&result.Email,
+		&result.Password,
+		&result.Number,
+		&result.Balance,
+		&result.CreateAt)
+
+	if err != nil {
+		return nil, err
+	}
+
+	fmt.Printf("%+v\n", result)
+
+	return result, nil
+}
+
+func (s *PostgresStorage) GetAccountByEmail(email string) (*Account, error) {
+	sql := `SELECT id, firstName, lastName, email, password, number, balance, createdAt FROM account WHERE email = $1`
+	account := s.db.QueryRow(sql, email)
+
+	result := new(Account)
+	err := account.Scan(&result.Id,
+		&result.FirstName,
+		&result.LastName,
+		&result.Email,
+		&result.Password,
 		&result.Number,
 		&result.Balance,
 		&result.CreateAt)
